@@ -1,5 +1,7 @@
 mod lex;
-mod parse;
+pub mod parse;
+pub mod ast;
+pub mod symtab;
 
 #[cfg(test)]
 mod tests {

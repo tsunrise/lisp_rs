@@ -1,20 +1,55 @@
 use logos::{Lexer, Logos};
 use crate::lex::RawToken;
+use serde_derive::Serialize;
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum Token<'a> {
+#[derive(PartialEq, Debug, Clone, Serialize)]
+pub enum SExp<'a> {
     Num(i64),
     Sym(&'a str),
-    Lst(Vec<Token<'a>>),
+    Lst(Vec<SExp<'a>>),
 }
 
-pub struct TokenIterator<'a> {
+impl<'a> SExp<'a> {
+    pub fn is_num(&self) -> bool {
+        if let SExp::Num(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+    
+    pub fn is_sym(&self) -> bool {
+        if let SExp::Sym(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+    
+    pub fn as_sym(&self) -> Option<&str> {
+        if let SExp::Sym(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+    
+    pub fn is_lst(&self) -> bool {
+        if let SExp::Lst(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+pub struct SExpIterator<'a> {
     raw_tokens: Vec<(RawToken, &'a str)>,
     pos: usize
 }
 
-impl<'a> TokenIterator<'a> {
-    pub fn new(input: &'a str) -> TokenIterator<'a> {
+impl<'a> SExpIterator<'a> {
+    pub fn new(input: &'a str) -> SExpIterator<'a> {
         let mut lexer: Lexer<_> = RawToken::lexer(input);
         let mut raw_tokens = Vec::new();
         while let Some(token) = lexer.next() {
@@ -43,7 +78,7 @@ impl<'a> TokenIterator<'a> {
         }
     }
 
-    fn parse_lst(&mut self) -> Vec<Token<'a>> {
+    fn parse_lst(&mut self) -> Vec<SExp<'a>> {
         let mut tokens = Vec::new();
         loop {
             match self.peek_next_raw() {
@@ -64,8 +99,8 @@ impl<'a> TokenIterator<'a> {
     }
 }
 
-impl<'a> Iterator for TokenIterator<'a> {
-    type Item = Token<'a>;
+impl<'a> Iterator for SExpIterator<'a> {
+    type Item = SExp<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_raw() {
@@ -74,14 +109,14 @@ impl<'a> Iterator for TokenIterator<'a> {
                 match tok.0 {
                     RawToken::Number => {
                         let num = tok.1.parse::<i64>().unwrap();
-                        Some(Token::Num(num))
+                        Some(SExp::Num(num))
                     },
                     RawToken::Symbol => {
                         let sym = tok.1;
-                        Some(Token::Sym(sym))
+                        Some(SExp::Sym(sym))
                     },
                     RawToken::LParen => {
-                        Some(Token::Lst(self.parse_lst()))
+                        Some(SExp::Lst(self.parse_lst()))
                     },
                     RawToken::RParen => {
                         panic!("Unexpected ')'")
@@ -108,35 +143,35 @@ mod tests{
             "(+ 1 (+ 2 3)  4)",
         ];
         let expected = [
-            Token::Lst(vec![
-                Token::Sym("+"),
-                Token::Num(1),
-                Token::Num(2)
+            SExp::Lst(vec![
+                SExp::Sym("+"),
+                SExp::Num(1),
+                SExp::Num(2)
             ]),
-            Token::Num(12),
-            Token::Lst(vec![
-                Token::Sym("+"),
-                Token::Num(1),
-                Token::Lst(vec![
-                    Token::Sym("+"),
-                    Token::Num(2),
-                    Token::Num(3)
+            SExp::Num(12),
+            SExp::Lst(vec![
+                SExp::Sym("+"),
+                SExp::Num(1),
+                SExp::Lst(vec![
+                    SExp::Sym("+"),
+                    SExp::Num(2),
+                    SExp::Num(3)
                 ])
             ]),
-            Token::Lst(vec![
-                Token::Sym("+"),
-                Token::Num(1),
-                Token::Lst(vec![
-                    Token::Sym("+"),
-                    Token::Num(2),
-                    Token::Num(3)
+            SExp::Lst(vec![
+                SExp::Sym("+"),
+                SExp::Num(1),
+                SExp::Lst(vec![
+                    SExp::Sym("+"),
+                    SExp::Num(2),
+                    SExp::Num(3)
                 ]),
-                Token::Num(4)
+                SExp::Num(4)
             ]),
         ];
 
         programs.into_iter().zip(expected.into_iter()).for_each(|(program, expected)| {
-            let mut token_iter = TokenIterator::new(program);
+            let mut token_iter = SExpIterator::new(program);
             let actual = token_iter.next();
             assert_eq!(actual, Some(expected));
         });
