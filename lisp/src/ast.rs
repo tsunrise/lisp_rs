@@ -146,8 +146,7 @@ impl<'a> SExp<'a> {
             Sym("false") => Bool(false),
             Sym(var) => Var(var),
             Lst(lst) => {
-                let s = &lst[..];
-                match s {
+                match lst.as_slice() {
                     // (let ((var expr)) body)
                     [Sym("let"), Lst(name), body] => match name.as_slice() {
                         [Sym(var_name), exp] => Let(
@@ -173,7 +172,9 @@ impl<'a> SExp<'a> {
                         Box::new(body.to_expr_lam()),
                     ),
                     // (prim0)
-                    [Sym(prim)] if prim0_of_str(prim).is_some() => Prim0(prim0_of_str(prim).unwrap()),
+                    [Sym(prim)] if prim0_of_str(prim).is_some() => {
+                        Prim0(prim0_of_str(prim).unwrap())
+                    },
                     // (prim1 arg)
                     [Sym(prim), arg] if prim1_of_str(prim).is_some() => {
                         Prim1(prim1_of_str(prim).unwrap(), Box::new(arg.to_expr_lam()))
@@ -185,13 +186,13 @@ impl<'a> SExp<'a> {
                         Box::new(arg2.to_expr_lam()),
                     ),
                     // (f args ...)
-                    [f, args @ ..] if f.is_sym() => Call(
+                    [f, args @ ..] => Call(
                         Box::new(f.to_expr_lam()),
                         args.iter().map(|x| x.to_expr_lam()).collect(),
                     ),
-                    _ => panic!("cannot parse s-exp to defined expression"),
+                    _ => panic!("cannot parse s-exp to defined expression: {:?}", self),
                 }
-            }
+            },
         }
     }
 }
@@ -275,7 +276,32 @@ mod tests {
                     )
                     .into(),
                 ),
-            )
+            ),
+            (
+                "(print (+ ((lambda (x) (+ x 1)) 2) 3))",
+                ExprLambda::Prim1(
+                    Prim1::Print,
+                    ExprLambda::Prim2(
+                        Prim2::Plus,
+                        ExprLambda::Call(
+                            ExprLambda::Lambda(
+                                vec!["x"],
+                                ExprLambda::Prim2(
+                                    Prim2::Plus,
+                                    ExprLambda::Var("x").into(),
+                                    ExprLambda::Num(1).into(),
+                                )
+                                .into(),
+                            )
+                            .into(),
+                            vec![ExprLambda::Num(2)],
+                        )
+                        .into(),
+                        ExprLambda::Num(3).into(),
+                    )
+                    .into(),
+                ),
+            ),
         ];
 
         for (s, expected) in test_cases {
