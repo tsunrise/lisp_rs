@@ -1,5 +1,5 @@
 mod lex;
-pub mod parse;
+pub mod s_exp;
 pub mod ast;
 pub mod symtab;
 

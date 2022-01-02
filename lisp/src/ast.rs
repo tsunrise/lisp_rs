@@ -1,6 +1,6 @@
 use crate::{
     ast::Expr::Closure,
-    parse::SExp,
+    s_exp::SExp,
     symtab::{SymGen, Symbol, ToSymbol},
 };
 
@@ -240,7 +240,7 @@ impl<'a> ExprLambda<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::SExpIterator;
+    use crate::s_exp::SExpIterator;
 
     #[test]
     fn test_parse_expr_lam() {
