@@ -1,6 +1,7 @@
 use logos::{Lexer, Logos};
 use crate::lex::RawToken;
 use serde_derive::Serialize;
+use crate::symtab::{Symbol, ToSymbol};
 
 #[derive(PartialEq, Debug, Clone, Serialize)]
 pub enum SExp<'a> {
@@ -26,9 +27,9 @@ impl<'a> SExp<'a> {
         }
     }
     
-    pub fn as_sym(&self) -> Option<&str> {
+    pub fn as_sym(&self) -> Option<Symbol<'a>> {
         if let SExp::Sym(s) = self {
-            Some(s)
+            Some(s.to_symbol())
         } else {
             None
         }

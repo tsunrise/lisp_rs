@@ -3,24 +3,64 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Ord, PartialOrd)]
 pub struct Symbol<'a> {
     name: &'a str,
-    unique_id: usize,
+    unique_id: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Ord, PartialOrd)]
+pub struct UniqueSymbol<'a>(Symbol<'a>);
+
+impl<'a> UniqueSymbol<'a> {
+    pub fn new(symbol: Symbol<'a>) -> Option<Self> {
+        if symbol.unique_id.is_some() {
+            Some(UniqueSymbol(symbol))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> From<UniqueSymbol<'a>> for Symbol<'a> {
+    fn from(unique_symbol: UniqueSymbol<'a>) -> Self {
+        unique_symbol.0
+    }
 }
 
 impl<'a> Symbol<'a> {
     pub fn new(name: &'a str, unique_id: usize) -> Self {
-        Symbol { name, unique_id }
+        Symbol {
+            name,
+            unique_id: Some(unique_id),
+        }
+    }
+    pub fn non_unique(name: &'a str) -> Self {
+        Symbol {
+            name,
+            unique_id: None,
+        }
     }
     pub fn name(&self) -> &'a str {
         self.name
     }
-    pub fn unique_id(&self) -> usize {
+    pub fn unique_id(&self) -> Option<usize> {
         self.unique_id
+    }
+    pub fn is_unique(&self) -> bool {
+        self.unique_id.is_some()
     }
 }
 
+pub trait ToSymbol<'a> {
+    fn to_symbol(&self) -> Symbol<'a>;
+}
+
+impl<'a> ToSymbol<'a> for &'a str {
+    fn to_symbol(&self) -> Symbol<'a> {
+        Symbol::non_unique(self)
+    }
+}
 
 pub struct SymGen {
-    curr_id: usize
+    curr_id: usize,
 }
 
 impl SymGen {
