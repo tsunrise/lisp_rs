@@ -3,7 +3,7 @@ pub mod s_exp;
 pub mod ast;
 pub mod symtab;
 pub mod interpret;
-pub mod closure;
+// pub mod closure;
 
 #[cfg(test)]
 mod tests {

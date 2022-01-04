@@ -154,7 +154,6 @@ impl<'a> Iterator for SExpIterator<'a> {
 
 #[cfg(test)]
 mod tests{
-    use crate::symtab::ToSymbol;
     use super::*;
 
     #[test]
