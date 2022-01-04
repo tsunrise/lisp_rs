@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use logos::{Lexer, Logos};
 use crate::lex::RawToken;
 use serde_derive::Serialize;
@@ -8,6 +9,12 @@ pub enum SExp<'a> {
     Num(i64),
     Sym(&'a str),
     Lst(Vec<SExp<'a>>),
+}
+
+impl Default for SExp<'static> {
+    fn default() -> Self {
+        SExp::Lst(Vec::new())
+    }
 }
 
 impl<'a> SExp<'a> {
@@ -40,6 +47,20 @@ impl<'a> SExp<'a> {
             true
         } else {
             false
+        }
+    }
+}
+
+impl<'a> Display for SExp<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SExp::Num(n) => write!(f, "{}", n),
+            SExp::Sym(s) => write!(f, "{}", s),
+            SExp::Lst(l) => {
+                write!(f, "(")?;
+                l[0..l.len() - 1].iter().try_for_each(|e| write!(f, "{} ", e))?;
+                write!(f, "{}?", &l[l.len() - 1])
+            }
         }
     }
 }
@@ -133,6 +154,7 @@ impl<'a> Iterator for SExpIterator<'a> {
 
 #[cfg(test)]
 mod tests{
+    use crate::symtab::ToSymbol;
     use super::*;
 
     #[test]

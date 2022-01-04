@@ -1,9 +1,20 @@
 use std::collections::BTreeMap;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Ord, PartialOrd)]
+use std::fmt::{Display, Formatter};
+use serde_derive::Serialize;
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Ord, PartialOrd, Serialize)]
 pub struct Symbol<'a> {
     name: &'a str,
     unique_id: Option<usize>,
+}
+
+impl<'a> Display for Symbol<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name);
+        match self.unique_id {
+            Some(id) => write!(f, "__{}", id),
+            None => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Ord, PartialOrd)]
@@ -47,6 +58,11 @@ impl<'a> Symbol<'a> {
     pub fn is_unique(&self) -> bool {
         self.unique_id.is_some()
     }
+
+    /// set the unique id. Return previous value if it was already set.
+    pub fn set_unique_id(&mut self, unique_id: usize) -> Option<usize> {
+        self.unique_id.replace(unique_id)
+    }
 }
 
 pub trait ToSymbol<'a> {
@@ -78,12 +94,12 @@ impl SymGen {
 
 /// A symbol table that be forked in constant time without affecting the
 /// original.
-pub struct Symtab<'a, T> {
+pub struct Symtab<'a,'b, T> {
     pub store: BTreeMap<Symbol<'a>, T>,
-    pub parent: Option<&'a Symtab<'a, T>>,
+    pub parent: Option<&'b Symtab<'a,'b, T>>,
 }
 
-impl<'a, T> Symtab<'a, T> {
+impl<'a,'b, T> Symtab<'a,'b, T> {
     pub fn new() -> Self {
         Symtab {
             store: BTreeMap::new(),
@@ -91,7 +107,7 @@ impl<'a, T> Symtab<'a, T> {
         }
     }
 
-    pub fn fork(&'a self) -> Self {
+    pub fn fork(&'b self) -> Self {
         Symtab {
             store: BTreeMap::new(),
             parent: Some(self),
@@ -121,5 +137,15 @@ impl<'a, T> Symtab<'a, T> {
     /// key exists in the current scope.
     pub fn remove(&mut self, key: Symbol<'a>) -> Option<T> {
         self.store.remove(&key)
+    }
+
+    /// Check if a key is present in current scope or any parent scope.
+    pub fn contains_key(&self, key: Symbol<'a>) -> bool {
+        self.store.contains_key(&key) || self.parent.map_or(false, |p| p.contains_key(key))
+    }
+
+    /// Check if current scope if top level.
+    pub fn is_root(&self) -> bool {
+        self.parent.is_none()
     }
 }

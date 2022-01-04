@@ -90,7 +90,8 @@ pub enum Expr<'a> {
     Num(i64),
     Var(Symbol<'a>),
     Closure(Symbol<'a>),
-    Call(Box<Expr<'a>>, Vec<Expr<'a>>),
+    Call(Symbol<'a>, Vec<Expr<'a>>),
+    DynCall(Box<Expr<'a>>, Vec<Expr<'a>>),
     Bool(bool),
 }
 
@@ -109,8 +110,10 @@ pub enum ExprLambda<'a> {
     Do(Vec<ExprLambda<'a>>),
     Num(i64),
     Var(Symbol<'a>),
-    /// (f x)
-    Call(Box<ExprLambda<'a>>, Vec<ExprLambda<'a>>),
+    /// (f x) where f is statically determined
+    Call(Symbol<'a>, Vec<ExprLambda<'a>>),
+    /// (f x) where f is a pointer dynamically determined
+    DynCall(Box<ExprLambda<'a>>, Vec<ExprLambda<'a>>),
     Bool(bool),
     /// (lambda (arg1 arg2 ...) body)
     Lambda(Vec<Symbol<'a>>, Box<ExprLambda<'a>>),
@@ -137,7 +140,7 @@ pub struct Program<'a> {
 }
 
 impl<'a> SExp<'a> {
-    pub fn to_expr_lam(&self) -> ExprLambda<'a> {
+    pub fn to_expr_lam(&self, available_defns: &[&'a str]) -> ExprLambda<'a> {
         use ExprLambda::*;
         use SExp::{Lst, Num, Sym};
         match self {
@@ -149,51 +152,90 @@ impl<'a> SExp<'a> {
                 match lst.as_slice() {
                     // (let ((var expr)) body)
                     [Sym("let"), Lst(name), body] => match name.as_slice() {
-
+                        [Sym("define"), ..] => panic!("is a definition: {:?}", self),
                         [Sym(var_name), exp] => Let(
                             var_name.to_symbol(),
-                            Box::new(exp.to_expr_lam()),
-                            Box::new(body.to_expr_lam()),
+                            Box::new(exp.to_expr_lam(available_defns)),
+                            Box::new(body.to_expr_lam(available_defns)),
                         ),
-                        bad => panic!("invalid `let` pattern: {:?}", bad),
+                        _ => panic!("invalid `let` pattern: {}", self),
                     },
                     // (do exprs ...)
-                    [Sym("do"), exps @ ..] if exps.len() > 0 => {
-                        Do(exps.iter().map(|e| e.to_expr_lam()).collect())
-                    },
+                    [Sym("do"), exps @ ..] if exps.len() > 0 => Do(exps
+                        .iter()
+                        .map(|e| e.to_expr_lam(available_defns))
+                        .collect()),
                     // (if cond then else)
                     [Sym("if"), test_s, then_s, else_s] => If(
-                        Box::new(test_s.to_expr_lam()),
-                        Box::new(then_s.to_expr_lam()),
-                        Box::new(else_s.to_expr_lam()),
+                        Box::new(test_s.to_expr_lam(available_defns)),
+                        Box::new(then_s.to_expr_lam(available_defns)),
+                        Box::new(else_s.to_expr_lam(available_defns)),
                     ),
                     // (lambda (args ...) body)
                     [Sym("lambda"), Lst(args), body] if args.iter().all(|x| x.is_sym()) => Lambda(
                         args.iter().map(|x| x.as_sym().unwrap()).collect(),
-                        Box::new(body.to_expr_lam()),
+                        Box::new(body.to_expr_lam(available_defns)),
                     ),
                     // (prim0)
                     [Sym(prim)] if prim0_of_str(prim).is_some() => {
                         Prim0(prim0_of_str(prim).unwrap())
                     },
                     // (prim1 arg)
-                    [Sym(prim), arg] if prim1_of_str(prim).is_some() => {
-                        Prim1(prim1_of_str(prim).unwrap(), Box::new(arg.to_expr_lam()))
-                    },
+                    [Sym(prim), arg] if prim1_of_str(prim).is_some() => Prim1(
+                        prim1_of_str(prim).unwrap(),
+                        Box::new(arg.to_expr_lam(available_defns)),
+                    ),
                     // (prim2 arg1 arg2)
                     [Sym(prim), arg1, arg2] if prim2_of_str(prim).is_some() => Prim2(
                         prim2_of_str(prim).unwrap(),
-                        Box::new(arg1.to_expr_lam()),
-                        Box::new(arg2.to_expr_lam()),
+                        Box::new(arg1.to_expr_lam(available_defns)),
+                        Box::new(arg2.to_expr_lam(available_defns)),
                     ),
                     // (f args ...)
-                    [f, args @ ..] => Call(
-                        Box::new(f.to_expr_lam()),
-                        args.iter().map(|x| x.to_expr_lam()).collect(),
+                    [Sym(s), args @ ..] if available_defns.contains(s) => Call(
+                        s.to_symbol(),
+                        args.iter()
+                            .map(|x| x.to_expr_lam(available_defns))
+                            .collect(),
+                    ),
+                    // (f args ...)
+                    [f, args @ ..] => DynCall(
+                        Box::new(f.to_expr_lam(available_defns)),
+                        args.iter()
+                            .map(|x| x.to_expr_lam(available_defns))
+                            .collect(),
                     ),
                     _ => panic!("cannot parse s-exp to defined expression: {:?}", self),
                 }
             },
+        }
+    }
+
+    pub fn is_defn(&self) -> bool {
+        use SExp::{Lst, Sym};
+        match self {
+            Lst(lst) => match lst.as_slice() {
+                [Sym("define"), ..] => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// If `self` is a definition, return the name of the definition, its
+    /// arguments, and its body.
+    pub fn to_name_args_body_of_defns(&self) -> Option<(Symbol<'a>, Vec<Symbol<'a>>, SExp<'a>)> {
+        use SExp::{Lst, Sym};
+        match self {
+            Lst(lst) => match lst.as_slice() {
+                [Sym("define"), Sym(name), Lst(args), body] => Some((
+                    name.to_symbol(),
+                    args.iter().map(|x| x.as_sym().unwrap()).collect(),
+                    body.clone(),
+                )),
+                _ => None,
+            },
+            _ => None,
         }
     }
 }
@@ -223,10 +265,11 @@ impl<'a> ExprLambda<'a> {
                 Box::new(arg2.to_expr(defns, sym)),
             ),
             Do(exps) => Expr::Do(exps.iter().map(|e| e.to_expr(defns, sym)).collect()),
-            Call(f, args) => Expr::Call(
+            DynCall(f, args) => Expr::DynCall(
                 Box::new(f.to_expr(defns, sym)),
                 args.iter().map(|x| x.to_expr(defns, sym)).collect(),
             ),
+            Call(f, args) => Expr::Call(*f, args.iter().map(|x| x.to_expr(defns, sym)).collect()),
             Lambda(args, body) => {
                 let name = sym.gensym("_lambda");
                 let body = body.to_expr(defns, sym);
@@ -284,7 +327,7 @@ mod tests {
                     Prim1::Print,
                     ExprLambda::Prim2(
                         Prim2::Plus,
-                        ExprLambda::Call(
+                        ExprLambda::DynCall(
                             ExprLambda::Lambda(
                                 vec!["x".to_symbol()],
                                 ExprLambda::Prim2(
@@ -307,7 +350,7 @@ mod tests {
 
         for (s, expected) in test_cases {
             let parsed = SExpIterator::new(s).next().unwrap();
-            let parsed = parsed.to_expr_lam();
+            let parsed = parsed.to_expr_lam(&[]);
             assert_eq!(parsed, expected);
         }
     }
@@ -333,6 +376,17 @@ mod tests {
                     vec![],
                 ),
             ),
+            (
+                "(+ 1 (some-func 2 3))",
+                (
+                    Expr::Prim2(
+                        Prim2::Plus,
+                        Expr::Num(1).into(),
+                        Expr::Call("some-func".to_symbol(), vec![Expr::Num(2), Expr::Num(3)]).into(),
+                    ),
+                    vec![],
+                ),
+            ),
             ("(let (x (lambda (x y) (+ x y))) (x 1 2))", {
                 let mut sym = SymGen::new();
                 let lmbda_name = sym.gensym("_lambda");
@@ -340,7 +394,7 @@ mod tests {
                     Expr::Let(
                         "x".to_symbol(),
                         Closure(lmbda_name).into(),
-                        Expr::Call(
+                        Expr::DynCall(
                             Expr::Var("x".to_symbol()).into(),
                             vec![Expr::Num(1), Expr::Num(2)],
                         )
@@ -366,7 +420,7 @@ mod tests {
                         Prim1::Print,
                         Expr::Prim2(
                             Prim2::Plus,
-                            Expr::Call(Expr::Closure(lmbda_name).into(), vec![Expr::Num(2)]).into(),
+                            Expr::DynCall(Expr::Closure(lmbda_name).into(), vec![Expr::Num(2)]).into(),
                             Expr::Num(3).into(),
                         )
                         .into(),
@@ -389,7 +443,7 @@ mod tests {
             let parsed = SExpIterator::new(s).next().unwrap();
             let mut defns = Vec::new();
             let mut sym = SymGen::new();
-            let parsed = parsed.to_expr_lam().to_expr(&mut defns, &mut sym);
+            let parsed = parsed.to_expr_lam(&["some-func"]).to_expr(&mut defns, &mut sym);
             assert_eq!(parsed, expected_body);
             assert_eq!(defns, expected_definitions);
         }

@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["lisp", "lisp-wasm"]
+members = ["lisp", "lisp-wasm", "compile"]
 
 [profile.release.package.lisp-wasm]
 # Tell `rustc` to optimize for small code size.
