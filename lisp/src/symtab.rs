@@ -9,7 +9,7 @@ pub struct Symbol<'a> {
 
 impl<'a> Display for Symbol<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name);
+        write!(f, "{}", self.name)?;
         match self.unique_id {
             Some(id) => write!(f, "__{}", id),
             None => Ok(()),

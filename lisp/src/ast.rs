@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use crate::{
     ast::Expr::Closure,
     s_exp::SExp,
@@ -135,7 +136,7 @@ impl<'a> Definition<'a> {
 
 #[derive(Debug, Clone)]
 pub struct Program<'a> {
-    pub defs: Vec<Definition<'a>>,
+    pub defs: BTreeMap<Symbol<'a>, Definition<'a>>,
     pub body: Expr<'a>,
 }
 
@@ -215,7 +216,8 @@ impl<'a> SExp<'a> {
         use SExp::{Lst, Sym};
         match self {
             Lst(lst) => match lst.as_slice() {
-                [Sym("define"), ..] => true,
+                [Sym("define"), Lst(lst), _] if lst.len() > 0 => true,
+                [Sym("define"), ..] => panic!("invalid definition: {:?}", self),
                 _ => false,
             },
             _ => false,
@@ -224,15 +226,18 @@ impl<'a> SExp<'a> {
 
     /// If `self` is a definition, return the name of the definition, its
     /// arguments, and its body.
-    pub fn to_name_args_body_of_defns(&self) -> Option<(Symbol<'a>, Vec<Symbol<'a>>, SExp<'a>)> {
+    pub fn to_name_args_body_of_defns(&self) -> Option<(&'a str, Vec<Symbol<'a>>, SExp<'a>)> {
         use SExp::{Lst, Sym};
         match self {
             Lst(lst) => match lst.as_slice() {
-                [Sym("define"), Sym(name), Lst(args), body] => Some((
-                    name.to_symbol(),
-                    args.iter().map(|x| x.as_sym().unwrap()).collect(),
-                    body.clone(),
-                )),
+                [Sym("define"), Lst(name_args), body] => match name_args.as_slice() {
+                    [Sym(name), args @ ..] => Some((
+                        name,
+                        args.iter().map(|x| x.as_sym().unwrap()).collect(),
+                        body.clone(),
+                    )),
+                    _ => panic!("invalid definition: {:?}", self),
+                }
                 _ => None,
             },
             _ => None,
@@ -241,42 +246,102 @@ impl<'a> SExp<'a> {
 }
 
 impl<'a> ExprLambda<'a> {
-    pub fn to_expr(&self, defns: &mut Vec<Definition<'a>>, sym: &mut SymGen) -> Expr<'a> {
+    pub fn to_expr(
+        &self,
+        lambda_defns_dest: &mut Vec<Definition<'a>>,
+        sym: &mut SymGen,
+    ) -> Expr<'a> {
         use ExprLambda::*;
         match self {
             Num(x) => Expr::Num(*x),
             Var(x) => Expr::Var(*x),
             Bool(b) => Expr::Bool(*b),
             If(cond, then, else_) => Expr::If(
-                Box::new(cond.to_expr(defns, sym)),
-                Box::new(then.to_expr(defns, sym)),
-                Box::new(else_.to_expr(defns, sym)),
+                Box::new(cond.to_expr(lambda_defns_dest, sym)),
+                Box::new(then.to_expr(lambda_defns_dest, sym)),
+                Box::new(else_.to_expr(lambda_defns_dest, sym)),
             ),
             Let(var, expr, body) => Expr::Let(
                 *var,
-                Box::new(expr.to_expr(defns, sym)),
-                Box::new(body.to_expr(defns, sym)),
+                Box::new(expr.to_expr(lambda_defns_dest, sym)),
+                Box::new(body.to_expr(lambda_defns_dest, sym)),
             ),
             Prim0(p) => Expr::Prim0(*p),
-            Prim1(p, arg) => Expr::Prim1(*p, Box::new(arg.to_expr(defns, sym))),
+            Prim1(p, arg) => Expr::Prim1(*p, Box::new(arg.to_expr(lambda_defns_dest, sym))),
             Prim2(p, arg1, arg2) => Expr::Prim2(
                 *p,
-                Box::new(arg1.to_expr(defns, sym)),
-                Box::new(arg2.to_expr(defns, sym)),
+                Box::new(arg1.to_expr(lambda_defns_dest, sym)),
+                Box::new(arg2.to_expr(lambda_defns_dest, sym)),
             ),
-            Do(exps) => Expr::Do(exps.iter().map(|e| e.to_expr(defns, sym)).collect()),
+            Do(exps) => Expr::Do(
+                exps.iter()
+                    .map(|e| e.to_expr(lambda_defns_dest, sym))
+                    .collect(),
+            ),
             DynCall(f, args) => Expr::DynCall(
-                Box::new(f.to_expr(defns, sym)),
-                args.iter().map(|x| x.to_expr(defns, sym)).collect(),
+                Box::new(f.to_expr(lambda_defns_dest, sym)),
+                args.iter()
+                    .map(|x| x.to_expr(lambda_defns_dest, sym))
+                    .collect(),
             ),
-            Call(f, args) => Expr::Call(*f, args.iter().map(|x| x.to_expr(defns, sym)).collect()),
+            Call(f, args) => Expr::Call(
+                *f,
+                args.iter()
+                    .map(|x| x.to_expr(lambda_defns_dest, sym))
+                    .collect(),
+            ),
             Lambda(args, body) => {
                 let name = sym.gensym("_lambda");
-                let body = body.to_expr(defns, sym);
-                defns.push(Definition::new(name, args.to_vec(), body));
+                let body = body.to_expr(lambda_defns_dest, sym);
+                lambda_defns_dest.push(Definition::new(name, args.to_vec(), body));
                 Closure(name)
             },
         }
+    }
+}
+
+impl<'a> FromIterator<SExp<'a>> for Program<'a> {
+    fn from_iter<T: IntoIterator<Item = SExp<'a>>>(iter: T) -> Self {
+        let lexed = iter.into_iter().collect::<Vec<SExp<'a>>>();
+        let mut defs = Vec::new();
+        let mut body = None;
+        lexed.into_iter().for_each(|s_exp| {
+            if s_exp.is_defn() {
+                defs.push(s_exp.to_name_args_body_of_defns().unwrap());
+            } else {
+                if body.is_some() {
+                    panic!("multiple bodies in program");
+                } else {
+                    body = Some(s_exp);
+                }
+            }
+        });
+        let available_defns = defs.iter().map(|(name, ..)| *name).collect::<Vec<_>>();
+
+        let mut sym = SymGen::new();
+        let mut lambda_defs = Vec::new();
+
+        let defs = defs
+            .into_iter()
+            .map(|(name, args, body)| {
+                let body = body
+                    .to_expr_lam(&available_defns)
+                    .to_expr(&mut lambda_defs, &mut sym);
+                Definition::new(name.to_symbol(), args, body)
+            })
+            .collect::<Vec<_>>();
+        let body = body
+            .expect("no body in program")
+            .to_expr_lam(&available_defns)
+            .to_expr(&mut lambda_defs, &mut sym);
+
+        let defs = lambda_defs
+            .into_iter()
+            .chain(defs)
+            .map(|d| (d.name, d))
+            .collect::<BTreeMap<_, _>>();
+
+        Program { defs, body }
     }
 }
 
@@ -382,7 +447,8 @@ mod tests {
                     Expr::Prim2(
                         Prim2::Plus,
                         Expr::Num(1).into(),
-                        Expr::Call("some-func".to_symbol(), vec![Expr::Num(2), Expr::Num(3)]).into(),
+                        Expr::Call("some-func".to_symbol(), vec![Expr::Num(2), Expr::Num(3)])
+                            .into(),
                     ),
                     vec![],
                 ),
@@ -420,7 +486,8 @@ mod tests {
                         Prim1::Print,
                         Expr::Prim2(
                             Prim2::Plus,
-                            Expr::DynCall(Expr::Closure(lmbda_name).into(), vec![Expr::Num(2)]).into(),
+                            Expr::DynCall(Expr::Closure(lmbda_name).into(), vec![Expr::Num(2)])
+                                .into(),
                             Expr::Num(3).into(),
                         )
                         .into(),
@@ -443,7 +510,9 @@ mod tests {
             let parsed = SExpIterator::new(s).next().unwrap();
             let mut defns = Vec::new();
             let mut sym = SymGen::new();
-            let parsed = parsed.to_expr_lam(&["some-func"]).to_expr(&mut defns, &mut sym);
+            let parsed = parsed
+                .to_expr_lam(&["some-func"])
+                .to_expr(&mut defns, &mut sym);
             assert_eq!(parsed, expected_body);
             assert_eq!(defns, expected_definitions);
         }
