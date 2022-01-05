@@ -13,7 +13,7 @@ pub enum RawToken {
     Symbol,
 
     #[error]
-    #[regex(r"[ \t\n\f]+", logos::skip)]
+    #[regex(r"[ \t\n\f\r]+", logos::skip)]
     Error,
 }
 

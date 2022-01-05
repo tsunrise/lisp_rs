@@ -33,13 +33,13 @@ impl<'a> Expr<'a> {
                     .get(&f_name)
                     .expect(&format!("function not found: {}", f_name));
                 assert_eq!(
-                    f.args.len(),
+                    f.args().len(),
                     args.len(),
                     "wrong number of arguments when calling {}",
                     f_name
                 );
                 let mut local_env = env.fork();
-                f.args.iter().zip(args.iter()).for_each(|(f, a)| {
+                f.args().iter().zip(args.iter()).for_each(|(f, a)| {
                     local_env.insert(f.clone(), a.interpret(defs, &env, io));
                 });
                 f.body.interpret(defs, &local_env, io)

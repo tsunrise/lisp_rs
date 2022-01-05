@@ -144,7 +144,7 @@ impl<'a> Iterator for SExpIterator<'a> {
                         panic!("Unexpected ')'")
                     },
                     RawToken::Error => {
-                        panic!("Lexer Error: unexpected character")
+                        panic!("Lexer Error: unexpected character: {}", tok.1)
                     }
                 }
             }

@@ -17,6 +17,13 @@ impl<'a> Display for Symbol<'a> {
     }
 }
 
+impl<'a> Symbol<'a> {
+    pub fn to_string(&self) -> String {
+        format!("{}", &self)
+    }
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Ord, PartialOrd)]
 pub struct UniqueSymbol<'a>(Symbol<'a>);
 

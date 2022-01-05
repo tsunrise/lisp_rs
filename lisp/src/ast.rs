@@ -120,17 +120,38 @@ pub enum ExprLambda<'a> {
     Lambda(Vec<Symbol<'a>>, Box<ExprLambda<'a>>),
 }
 
+/// definition of a function with no body
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prototype<'a> {
+    pub name: Symbol<'a>,
+    pub args: Vec<Symbol<'a>>,
+}
+
+impl<'a> Prototype<'a> {
+    pub fn new(name: Symbol<'a>, args: Vec<Symbol<'a>>) -> Self {
+        Prototype { name, args }
+    }
+}
+
 /// definition of a function
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Definition<'a> {
-    pub name: Symbol<'a>,
-    pub args: Vec<Symbol<'a>>,
+    pub proto: Prototype<'a>,
     pub body: Expr<'a>,
 }
 
 impl<'a> Definition<'a> {
     pub fn new(name: Symbol<'a>, args: Vec<Symbol<'a>>, body: Expr<'a>) -> Self {
-        Definition { name, args, body }
+        Definition {
+            proto: Prototype::new(name, args),
+            body,
+        }
+    }
+    pub fn name(&self) -> &Symbol<'a> {
+        &self.proto.name
+    }
+    pub fn args(&self) -> &Vec<Symbol<'a>> {
+        &self.proto.args
     }
 }
 
@@ -338,7 +359,7 @@ impl<'a> FromIterator<SExp<'a>> for Program<'a> {
         let defs = lambda_defs
             .into_iter()
             .chain(defs)
-            .map(|d| (d.name, d))
+            .map(|d| (*d.name(), d))
             .collect::<BTreeMap<_, _>>();
 
         Program { defs, body }
