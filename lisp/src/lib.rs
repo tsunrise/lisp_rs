@@ -5,13 +5,3 @@ pub mod symtab;
 pub mod interpret;
 #[cfg(feature = "compiler")]
 pub mod compiler;
-// pub mod closure;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}
