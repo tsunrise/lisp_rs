@@ -50,7 +50,7 @@ cargo build --release
 To use compiler feature, you need to have LLVM-13 installed on your system. LLVM can be downloaded
 in https://releases.llvm.org/download.html#13.0.0. Check out more details on https://crates.io/crates/llvm-sys.
 
-This library comes with unit tests for each of the provided crates. Run the tests with:
+This library comes with unit tests. Run the tests with:
 
 ```bash
 cargo test
