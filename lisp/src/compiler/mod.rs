@@ -6,6 +6,7 @@ use inkwell::{
     builder::Builder,
     context::Context,
     module::Module,
+    passes::PassManager,
     values::{BasicValue, BasicValueEnum, FunctionValue, IntValue},
 };
 
@@ -13,15 +14,33 @@ pub struct Compiler<'ctx> {
     pub context: &'ctx Context,
     pub builder: Builder<'ctx>,
     pub module: Module<'ctx>,
+    pub fpm: inkwell::passes::PassManager<FunctionValue<'ctx>>,
 }
 
 impl<'ctx> Compiler<'ctx> {
-    pub fn new(context: &'ctx Context, builder: Builder<'ctx>, module: Module<'ctx>) -> Self {
+    pub fn new(context: &'ctx Context) -> Self {
+        let builder = context.create_builder();
+        let module = context.create_module("demo");
+        let fpm = PassManager::create(&module);
+
+        // optimizations options
+        fpm.add_instruction_combining_pass(); // peephole optimizations
+        fpm.add_reassociate_pass(); // reassociate expressions
+        fpm.add_gvn_pass(); // perform CSE
+        fpm.add_cfg_simplification_pass(); // simplify control flow graph
+
+        fpm.initialize();
+
         Compiler {
             context,
             builder,
             module,
+            fpm,
         }
+    }
+
+    pub fn run_passes(&self, f: FunctionValue) {
+        self.fpm.run_on(&f);
     }
 }
 
@@ -33,23 +52,7 @@ impl<'a> Expr<'a> {
     ) -> IntValue<'ctx> {
         match self {
             Expr::Num(n) => compiler.context.i64_type().const_int(*n as u64, true),
-            Expr::Prim2(Prim2::Plus, a, b) => {
-                let a = a.codegen(compiler, env);
-                let b = b.codegen(compiler, env);
-                compiler.builder.build_int_add(a, b, "addtmp")
-            },
-            Expr::Prim2(Prim2::Minus, a, b) => {
-                let a = a.codegen(compiler, env);
-                let b = b.codegen(compiler, env);
-                compiler.builder.build_int_sub(a, b, "subtmp")
-            },
-            Expr::Var(name) => {
-                let var = env.get(*name);
-                match var {
-                    Some(v) => v.into_int_value(),
-                    None => panic!("Unbound variable: {}", name),
-                }
-            },
+            Expr::Prim2(prim, a, b) => compile_prim2(compiler, env, *prim, a, b),
             Expr::Call(f, args) => {
                 // check if function is defined
                 let f = compiler
@@ -68,8 +71,54 @@ impl<'a> Expr<'a> {
                     .expect("invalid function return value")
                     .into_int_value()
             },
-            _ => todo!()
+            Expr::Var(name) => {
+                let var = env.get(*name);
+                match var {
+                    Some(v) => v.into_int_value(),
+                    None => panic!("Unbound variable: {}", name),
+                }
+            },
+            _ => todo!("unsupported expression: {}", self),
         }
+    }
+}
+
+fn compile_prim2<'ctx>(
+    compiler: &Compiler<'ctx>,
+    env: &Symtab<BasicValueEnum<'ctx>>,
+    prim2: Prim2,
+    a: &Expr,
+    b: &Expr,
+) -> IntValue<'ctx> {
+    let a = a.codegen(compiler, env);
+    let b = b.codegen(compiler, env);
+    match prim2 {
+        Prim2::Plus => compiler.builder.build_int_add(a, b, "addtmp"),
+        Prim2::Minus => compiler.builder.build_int_sub(a, b, "subtmp"),
+        Prim2::Eq => {
+            let cmp =
+                compiler
+                    .builder
+                    .build_int_compare(inkwell::IntPredicate::EQ, a, b, "eqtmp_i1");
+            // cmp is i1, convert to i64
+            compiler
+                .builder
+                .build_int_z_extend(cmp, compiler.context.i64_type(), "eqtmp")
+        },
+        Prim2::Lt => {
+            let cmp =
+                compiler
+                    .builder
+                    .build_int_compare(inkwell::IntPredicate::SLT, a, b, "lttmp_i1");
+            // cmp is i1, convert to i64
+            compiler
+                .builder
+                .build_int_z_extend(cmp, compiler.context.i64_type(), "lttmp")
+        },
+
+        Prim2::Pair => {
+            todo!()
+        },
     }
 }
 
@@ -133,31 +182,46 @@ impl<'a> Program<'a> {
     pub fn codegen(self, compiler: &Compiler) {
         // first, compile all definitions
         self.defs.values().for_each(|def| {
-            def.codegen(compiler);
+            let f = def.codegen(compiler);
+            // optimize the function
+            compiler.run_passes(f);
         });
 
         let main = Definition::main(self.body);
-        main.codegen(compiler);
+        let main_f = main.codegen(compiler);
+        // optimize the main function
+        compiler.run_passes(main_f);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{ast::Program, compiler::Compiler, s_exp::SExpIterator};
-    use inkwell::context::Context;
+    use inkwell::{context::Context, OptimizationLevel};
 
     #[test]
     fn demo() {
-        let program_str = std::fs::read_to_string("./lisp_examples/demo_program.lisp").unwrap();
+        const PROGRAM: &str = include_str!("../../lisp_examples/demo_program.lisp");
 
-        let program = SExpIterator::new(&program_str).collect::<Program>();
+        let program = SExpIterator::new(&PROGRAM).collect::<Program>();
         let context = Context::create();
-        let builder = context.create_builder();
-        let module = context.create_module("demo");
-        let compiler = Compiler::new(&context, builder, module);
+        let compiler = Compiler::new(&context);
 
         program.codegen(&compiler);
 
         compiler.module.print_to_stderr();
+
+        // evaluate the compiled program
+        let jit_engine = compiler
+            .module
+            .create_jit_execution_engine(OptimizationLevel::None)
+            .unwrap();
+
+        let main_func =
+            unsafe { jit_engine.get_function::<unsafe extern "C" fn() -> i64>("main") }.expect("unable to get main function: ");
+        let value = unsafe { main_func.call() };
+
+        println!();
+        println!("Return Value: {}", value);
     }
 }

@@ -1,49 +1,66 @@
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
 use crate::{
     ast::Expr::Closure,
     s_exp::SExp,
     symtab::{SymGen, Symbol, ToSymbol},
 };
+use derive_more::{Display};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum Prim0 {
     /// read-num
+    #[display(fmt = "read-num")]
     ReadNum,
     /// newline
+    #[display(fmt = "newline")]
     NewLine,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum Prim1 {
     /// add1
+    #[display(fmt = "add1")]
     Add1,
     /// sub1
+    #[display(fmt = "sub1")]
     Sub1,
     /// zero?
+    #[display(fmt = "zero?")]
     ZeroP,
     /// num?
+    #[display(fmt = "num?")]
     NumP,
     /// not
+    #[display(fmt = "not")]
     Not,
     /// left
+    #[display(fmt = "left")]
     Left,
     /// right
+    #[display(fmt = "right")]
     Right,
     /// print
+    #[display(fmt = "print")]
     Print,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum Prim2 {
     /// +
+    #[display(fmt = "+")]
     Plus,
     /// -
+    #[display(fmt = "-")]
     Minus,
     /// =
+    #[display(fmt = "=")]
     Eq,
     /// <
+    #[display(fmt = "<")]
     Lt,
     /// pair
+    #[display(fmt = "pair")]
     Pair,
 }
 
@@ -94,6 +111,45 @@ pub enum Expr<'a> {
     Call(Symbol<'a>, Vec<Expr<'a>>),
     DynCall(Box<Expr<'a>>, Vec<Expr<'a>>),
     Bool(bool),
+}
+
+impl<'a> Display for Expr<'a>{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Prim0(p) => write!(f, "({})", *p),
+            Self::Prim1(p, a) => write!(f, "({} {})", *p, a),
+            Self::Prim2(p ,a, b) => write!(f, "({} {} {})", *p, a, b),
+            Self::Let(x, a, b) => write!(f, "(let ({} {}) {})", x, a, b),
+            Self::If(a, b, c) => write!(f, "(if {} {} {})", a, b, c),
+            Self::Do(es) => {
+                write!(f, "(do")?;
+                for e in es {
+                    write!(f, " {}", e)?;
+                }
+                write!(f, ")")
+            },
+            Self::Num(n) => write!(f, "{}", n),
+            Self::Var(x) => write!(f, "{}", x),
+            Self::Closure(x) => write!(f, "closure#{}", x),
+            Self::Call(x, es) => {
+                write!(f, "({}", x)?;
+                for e in es {
+                    write!(f, " {}", e)?;
+                }
+                write!(f, ")")?;
+                Ok(())
+            },
+            Self::DynCall(a, es) => {
+                write!(f, "([dyn]{}", a)?;
+                for e in es {
+                    write!(f, " {}", e)?;
+                }
+                write!(f, ")")?;
+                Ok(())
+            },
+            Self::Bool(b) => write!(f, "{}", b),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
