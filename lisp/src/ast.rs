@@ -53,6 +53,12 @@ pub enum Prim2 {
     /// -
     #[display(fmt = "-")]
     Minus,
+    /// *
+    #[display(fmt = "*")]
+    Times,
+    /// /
+    #[display(fmt = "/")]
+    Divide,
     /// =
     #[display(fmt = "=")]
     Eq,
@@ -90,6 +96,8 @@ pub fn prim2_of_str(s: &str) -> Option<Prim2> {
     match s {
         "+" => Some(Prim2::Plus),
         "-" => Some(Prim2::Minus),
+        "*" => Some(Prim2::Times),
+        "/" => Some(Prim2::Divide),
         "=" => Some(Prim2::Eq),
         "<" => Some(Prim2::Lt),
         "pair" => Some(Prim2::Pair),

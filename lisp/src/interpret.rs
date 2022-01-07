@@ -5,6 +5,7 @@ use crate::{
     symtab::{Symbol, Symtab},
 };
 use std::collections::BTreeMap;
+use crate::ast::{Prim1, Prim2};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LispValue {
@@ -26,7 +27,7 @@ impl<'a> Expr<'a> {
         env: &Symtab<LispValue>,
         io: &mut T,
     ) -> LispValue {
-        use crate::ast::{Prim0, Prim1, Prim2};
+        use crate::ast::Prim0;
         match self {
             Self::Call(f_name, args) => {
                 let f = defs
@@ -43,122 +44,52 @@ impl<'a> Expr<'a> {
                     local_env.insert(f.clone(), a.interpret(defs, &env, io));
                 });
                 f.body.interpret(defs, &local_env, io)
-            },
+            }
             Self::DynCall(..) => unimplemented!("dynamic calls not supported yet"),
             Self::Prim0(Prim0::ReadNum) => LispValue::Number(io.input_num()),
             Self::Prim0(Prim0::NewLine) => {
                 io.newline();
                 LispValue::Bool(true)
-            },
-            Self::Prim1(Prim1::Print, expr) => {
-                let val = expr.interpret(defs, env, io);
-                io.output_val(&val);
-                LispValue::Bool(true)
-            },
+            }
             Self::Do(exprs) => {
                 let mut last_val = LispValue::Bool(true);
                 for expr in exprs {
                     last_val = expr.interpret(defs, env, io);
                 }
                 last_val
-            },
-            Self::Prim2(Prim2::Pair, a, bv) => LispValue::Pair(
-                Box::new(a.interpret(defs, env, io)),
-                Box::new(bv.interpret(defs, env, io)),
-            ),
-            Self::Prim1(Prim1::Left, expr) => {
-                let pair = expr.interpret(defs, env, io);
-                match pair {
-                    LispValue::Pair(a, _) => *a,
-                    _ => panic!("left called on non-pair value"),
-                }
-            },
-            Self::Prim1(Prim1::Right, expr) => {
-                let pair = expr.interpret(defs, env, io);
-                match pair {
-                    LispValue::Pair(_, b) => *b,
-                    _ => panic!("right called on non-pair value"),
-                }
-            },
+            }
             Self::Var(name) => {
                 if env.contains_key(*name) {
                     env.get(*name).unwrap().clone()
                 } else {
                     panic!("unbound variable {}", name)
                 }
-            },
+            }
             Self::Let(var, e, body) => {
                 let e = e.interpret(defs, env, io);
                 let mut local_env = env.fork();
                 local_env.insert(*var, e);
                 body.interpret(defs, &local_env, io)
-            },
+            }
             Self::Num(n) => LispValue::Number(*n),
             Self::Bool(b) => LispValue::Bool(*b),
-            Self::Prim1(Prim1::Not, expr) => {
-                let val = expr.interpret(defs, env, io);
-                match val {
-                    LispValue::Bool(b) => LispValue::Bool(!b),
-                    _ => panic!("not called on non-bool value"),
-                }
-            },
-            Self::Prim1(Prim1::ZeroP, expr) => {
-                let val = expr.interpret(defs, env, io);
-                match val {
-                    LispValue::Number(n) => LispValue::Bool(n == 0),
-                    _ => LispValue::Bool(false),
-                }
-            },
-            Self::Prim1(Prim1::NumP, expr) => {
-                let val = expr.interpret(defs, env, io);
-                match val {
-                    LispValue::Number(_) => LispValue::Bool(true),
-                    _ => LispValue::Bool(false),
-                }
-            },
-            Self::Prim1(Prim1::Add1, expr) => {
-                let val = expr.interpret(defs, env, io);
-                match val {
-                    LispValue::Number(n) => LispValue::Number(n + 1),
-                    _ => panic!("add1 called on non-number value"),
-                }
-            },
             Self::Prim1(Prim1::Sub1, expr) => {
                 let val = expr.interpret(defs, env, io);
                 match val {
                     LispValue::Number(n) => LispValue::Number(n - 1),
                     _ => panic!("sub1 called on non-number value"),
                 }
-            },
-            Self::Prim2(Prim2::Plus, a, b) => {
+            }
+            Self::Prim1(p, a) => {
+                let a = a.interpret(defs, env, io);
+                Self::interpret_prim1(*p, a, io)
+            }
+            Self::Prim2(p, a, b) => {
                 let a = a.interpret(defs, env, io);
                 let b = b.interpret(defs, env, io);
-                match (a, b) {
-                    (LispValue::Number(a), LispValue::Number(b)) => LispValue::Number(a + b),
-                    _ => panic!("+ called on non-number values"),
-                }
-            },
-            Self::Prim2(Prim2::Minus, a, b) => {
-                let a = a.interpret(defs, env, io);
-                let b = b.interpret(defs, env, io);
-                match (a, b) {
-                    (LispValue::Number(a), LispValue::Number(b)) => LispValue::Number(a - b),
-                    _ => panic!("- called on non-number values"),
-                }
-            },
-            Self::Prim2(Prim2::Eq, a, b) => {
-                let a = a.interpret(defs, env, io);
-                let b = b.interpret(defs, env, io);
-                LispValue::Bool(a == b)
-            },
-            Self::Prim2(Prim2::Lt, a, b) => {
-                let a = a.interpret(defs, env, io);
-                let b = b.interpret(defs, env, io);
-                match (a, b) {
-                    (LispValue::Number(a), LispValue::Number(b)) => LispValue::Bool(a < b),
-                    _ => panic!("< called on non-number values"),
-                }
-            },
+                Self::interpret_prim2(*p, a, b)
+            }
+
             Self::If(cond, then, else_) => {
                 let cond = cond.interpret(defs, env, io);
                 match cond {
@@ -166,8 +97,90 @@ impl<'a> Expr<'a> {
                     LispValue::Bool(false) => else_.interpret(defs, env, io),
                     _ => panic!("if called on non-bool value"),
                 }
-            },
+            }
             Self::Closure(_) => todo!(),
+        }
+    }
+
+    fn interpret_prim2(p: Prim2, a: LispValue, b: LispValue) -> LispValue {
+        match p {
+            Prim2::Plus => match (a, b) {
+                (LispValue::Number(a), LispValue::Number(b)) => LispValue::Number(a + b),
+                _ => panic!("+ called on non-number values"),
+            },
+            Prim2::Minus => match (a, b) {
+                (LispValue::Number(a), LispValue::Number(b)) => LispValue::Number(a - b),
+                _ => panic!("- called on non-number values"),
+            },
+            Prim2::Times => match (a, b) {
+                (LispValue::Number(a), LispValue::Number(b)) => LispValue::Number(a * b),
+                _ => panic!("* called on non-number values"),
+            },
+            Prim2::Divide => match (a, b) {
+                (LispValue::Number(a), LispValue::Number(b)) => LispValue::Number(a / b),
+                _ => panic!("/ called on non-number values"),
+            },
+            Prim2::Pair => {
+                LispValue::Pair(a.into(), b.into())
+            }
+            Prim2::Lt => match (a, b) {
+                (LispValue::Number(a), LispValue::Number(b)) => LispValue::Bool(a < b),
+                _ => panic!("< called on non-number values"),
+            },
+            Prim2::Eq => {
+                LispValue::Bool(a == b)
+            }
+        }
+    }
+
+    fn interpret_prim1<T: IO>(p: Prim1, a: LispValue, io: &mut T) -> LispValue {
+        match p {
+            Prim1::Print => {
+                io.output_val(&a);
+                LispValue::Bool(true)
+            }
+            Prim1::Left => {
+                match a {
+                    LispValue::Pair(a, _) => *a,
+                    _ => panic!("left called on non-pair value"),
+                }
+            }
+            Prim1::Right => {
+                match a {
+                    LispValue::Pair(_, b) => *b,
+                    _ => panic!("right called on non-pair value"),
+                }
+            }
+            Prim1::Not => {
+                match a {
+                    LispValue::Bool(b) => LispValue::Bool(!b),
+                    _ => panic!("not called on non-bool value"),
+                }
+            }
+            Prim1::ZeroP => {
+                match a {
+                    LispValue::Number(n) => LispValue::Bool(n == 0),
+                    _ => LispValue::Bool(false),
+                }
+            }
+            Prim1::NumP => {
+                match a {
+                    LispValue::Number(_) => LispValue::Bool(true),
+                    _ => LispValue::Bool(false),
+                }
+            }
+            Prim1::Add1 => {
+                match a {
+                    LispValue::Number(n) => LispValue::Number(n + 1),
+                    _ => panic!("add1 called on non-number value"),
+                }
+            }
+            Prim1::Sub1 => {
+                match a {
+                    LispValue::Number(n) => LispValue::Number(n - 1),
+                    _ => panic!("sub1 called on non-number value"),
+                }
+            }
         }
     }
 }

@@ -1,3 +1,4 @@
-(define (double x) (+ x x))
+(define (square x) (* x x))
+(define (cube x) (* x (square x)))
 
-(+ (+ 13 13) (+ 13 (double 13)))
+(cube 3)

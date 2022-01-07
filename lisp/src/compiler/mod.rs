@@ -95,6 +95,8 @@ fn compile_prim2<'ctx>(
     match prim2 {
         Prim2::Plus => compiler.builder.build_int_add(a, b, "addtmp"),
         Prim2::Minus => compiler.builder.build_int_sub(a, b, "subtmp"),
+        Prim2::Times => compiler.builder.build_int_mul(a, b, "multmp"),
+        Prim2::Divide => compiler.builder.build_int_signed_div(a, b, "divtmp"),
         Prim2::Eq => {
             let cmp =
                 compiler
@@ -130,8 +132,9 @@ impl<'a> Prototype<'a> {
             .collect::<Vec<_>>();
 
         let fn_type = ret_type.fn_type(&args_types, false);
-        let fn_name = format!("{}", self.name);
-        let fn_val = compiler.module.add_function(&fn_name, fn_type, None);
+        let fn_val = compiler
+            .module
+            .add_function(&self.name.to_string(), fn_type, None);
 
         // set argument names
         fn_val.get_param_iter().enumerate().for_each(|(i, arg)| {
@@ -148,10 +151,17 @@ impl<'a> Definition<'a> {
         Definition::new(Symbol::non_unique("main"), vec![], body)
     }
 
-    /// generate code for the function definition
-    pub fn codegen<'ctx>(&self, compiler: &Compiler<'ctx>) -> FunctionValue<'ctx> {
-        let function = self.proto.codegen(compiler);
+    /// generate declaration of function
+    pub fn codegen_declaration<'ctx>(&self, compiler: &Compiler<'ctx>) -> FunctionValue<'ctx> {
+        self.proto.codegen(compiler)
+    }
 
+    /// generate body for the function definition
+    pub fn codegen_body<'ctx>(&self, compiler: &Compiler<'ctx>) -> FunctionValue<'ctx> {
+        let function = compiler
+            .module
+            .get_function(self.proto.name.to_string().as_str())
+            .unwrap();
         let entry = compiler.context.append_basic_block(function, "entry");
 
         compiler.builder.position_at_end(entry);
@@ -180,15 +190,20 @@ impl<'a> Definition<'a> {
 
 impl<'a> Program<'a> {
     pub fn codegen(self, compiler: &Compiler) {
-        // first, compile all definitions
+        // first, compiler all function declarations so they can call each other
         self.defs.values().for_each(|def| {
-            let f = def.codegen(compiler);
+            def.codegen_declaration(compiler);
+        });
+        // then, compile all body of all functions
+        self.defs.values().for_each(|def| {
+            let f = def.codegen_body(compiler);
             // optimize the function
             compiler.run_passes(f);
         });
 
         let main = Definition::main(self.body);
-        let main_f = main.codegen(compiler);
+        main.codegen_declaration(compiler);
+        let main_f = main.codegen_body(compiler);
         // optimize the main function
         compiler.run_passes(main_f);
     }
@@ -217,9 +232,12 @@ mod tests {
             .create_jit_execution_engine(OptimizationLevel::None)
             .unwrap();
 
-        let main_func =
-            unsafe { jit_engine.get_function::<unsafe extern "C" fn() -> i64>("main") }.expect("unable to get main function: ");
+        let main_func = unsafe { jit_engine.get_function::<unsafe extern "C" fn() -> i64>("main") }
+            .expect("unable to get main function: ");
         let value = unsafe { main_func.call() };
+
+        // free up space
+        jit_engine.remove_module(&compiler.module).unwrap();
 
         println!();
         println!("Return Value: {}", value);
