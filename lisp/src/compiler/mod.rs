@@ -78,6 +78,59 @@ impl<'a> Expr<'a> {
                     None => panic!("Unbound variable: {}", name),
                 }
             },
+            Expr::If(cond, then, els) => {
+                let cond_val = cond.codegen(compiler, env);
+                // cond_val is an i64, we need to convert it to i1
+                // rule: if cond_val is 0, it's false, otherwise it's true
+                let cond_bool = compiler.builder.build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    cond_val,
+                    compiler.context.i64_type().const_zero(),
+                    "if_cond",
+                );
+
+                let curr_func = compiler
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .expect("no parent");
+
+                let mut then_bb = compiler.context.append_basic_block(curr_func, "if_then");
+                let mut else_bb = compiler.context.append_basic_block(curr_func, "if_else");
+                let merge_bb = compiler
+                    .context
+                    .append_basic_block(curr_func, "if_continue");
+
+                compiler
+                    .builder
+                    .build_conditional_branch(cond_bool, then_bb, else_bb);
+
+                // codegen for THEN branch
+                compiler.builder.position_at_end(then_bb);
+                let then_val = then.codegen(compiler, env);
+                compiler.builder.build_unconditional_branch(merge_bb);
+                // get updated then block because codegen for THEN branch may have added new
+                // blocks
+                then_bb = compiler.builder.get_insert_block().unwrap();
+
+                // codegen for ELSE branch
+                compiler.builder.position_at_end(else_bb);
+                let else_val = els.codegen(compiler, env);
+                compiler.builder.build_unconditional_branch(merge_bb);
+                // get updated else block because codegen for ELSE branch may have added new
+                // blocks
+                else_bb = compiler.builder.get_insert_block().unwrap();
+
+                // codegen for merge block
+                compiler.builder.position_at_end(merge_bb);
+                let phi = compiler
+                    .builder
+                    .build_phi(compiler.context.i64_type(), "if_merge_phi");
+                phi.add_incoming(&[(&then_val, then_bb), (&else_val, else_bb)]);
+
+                phi.as_basic_value().into_int_value()
+            },
             _ => todo!("unsupported expression: {}", self),
         }
     }
@@ -214,19 +267,7 @@ mod tests {
     use crate::{ast::Program, compiler::Compiler, s_exp::SExpIterator};
     use inkwell::{context::Context, OptimizationLevel};
 
-    #[test]
-    fn demo() {
-        const PROGRAM: &str = include_str!("../../lisp_examples/demo_program.lisp");
-
-        let program = SExpIterator::new(&PROGRAM).collect::<Program>();
-        let context = Context::create();
-        let compiler = Compiler::new(&context);
-
-        program.codegen(&compiler);
-
-        compiler.module.print_to_stderr();
-
-        // evaluate the compiled program
+    fn evaluate_body_using_jit(compiler: &Compiler) -> i64 {
         let jit_engine = compiler
             .module
             .create_jit_execution_engine(OptimizationLevel::None)
@@ -239,7 +280,28 @@ mod tests {
         // free up space
         jit_engine.remove_module(&compiler.module).unwrap();
 
+        value
+    }
+
+    #[test]
+    fn control_flow_test() {
+        const PROGRAM: &str = include_str!("../../lisp_examples/fib.lisp");
+
+        let program = SExpIterator::new(&PROGRAM).collect::<Program>();
+        let context = Context::create();
+        let compiler = Compiler::new(&context);
+
+        program.codegen(&compiler);
+
+        compiler.module.print_to_stderr();
+
+        // evaluate the compiled program
+        let value = evaluate_body_using_jit(&compiler);
+
         println!();
         println!("Return Value: {}", value);
+        assert_eq!(value, 55);
     }
+
+
 }

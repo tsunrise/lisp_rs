@@ -23,7 +23,7 @@ Unlike CS164 compiler, this crate plans to use LLVM backend. The compiler is in 
 work yet).
 
 - [x] Primitives (partly finished)
-- [ ] Control Flow
+- [x] Control Flow
 - [x] Function Call
 - [ ] Function Inlining
 - [ ] ...
